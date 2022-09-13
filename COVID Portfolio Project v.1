@@ -1,0 +1,174 @@
+SELECT *
+FROM CovidDeaths
+ORDER BY 3,4
+
+--1. SELECTING DATA TO BE ANALYSED FOR KENYA
+SELECT location, date, total_cases, new_cases, total_deaths, population
+FROM CovidDeaths
+WHERE location like '%Kenya%'
+ORDER BY 1,2
+
+--2. A COMPARISON OF TOTAL CASES vs TOTAL DEATHS IN KENYA
+SELECT location, date, total_cases, total_deaths, ROUND((total_deaths/total_cases)*100,2) AS Death_Rate
+FROM CovidDeaths
+WHERE location = 'Kenya'
+AND total_cases IS NOT NULL
+AND total_deaths IS NOT NULL
+ORDER BY 1,2;
+
+--3. AN ANALYSIS OF THE DAYS WITH THE HIGHEST DEATH RATES IN KENYA
+SELECT date, MAX(ROUND((total_deaths/total_cases)*100,2)) AS Death_Rate
+FROM CovidDeaths
+WHERE location = 'Kenya'
+AND total_cases IS NOT NULL
+AND total_deaths IS NOT NULL
+GROUP BY date
+ORDER BY Death_Rate DESC
+-- This analysis gives the likelihood of dying on any given day if you were to contract COVID.
+-- 16th May 2020 was the day with the highest death rate at 6.02%. 
+
+--4. AN ANALYSIS OF THE COVID INFECTIONS IN THE WORLD THAT WERE FROM AFRICA
+WITH Africa AS(
+SELECT SUM(total_cases) AS Infections_Africa
+FROM CovidDeaths
+WHERE continent = 'Africa')
+SELECT (Infections_Africa/SUM(total_cases))*100 AS Infection_Rate_Africa
+FROM CovidDeaths
+CROSS JOIN Africa
+GROUP BY Infections_Africa;
+-- Africa had an infection rate of 1.10%.
+
+--5. AN ANALYSIS OF THE COVID INFECTIONS IN THE WORLD THAT WERE FROM KENYA
+WITH Kenya AS (
+SELECT SUM(total_cases) AS Infections_Kenya
+FROM CovidDeaths
+WHERE location = 'Kenya'
+AND continent = 'Africa')
+
+SELECT (Infections_Kenya/SUM(total_cases))*100 AS Infections_Rate_Kenya_WW
+FROM CovidDeaths
+CROSS JOIN Kenya
+GROUP BY Infections_Kenya;
+-- Out of the world population infected with COVID, 0.33% were Kenyans.
+
+--6. Countries with the highest infection rate compared to Population
+SELECT location, population, MAX(total_cases) AS Infection_Count, MAX(ROUND((total_cases/population)*100,2)) AS Infection_Rate
+FROM CovidDeaths
+WHERE population IS NOT NULL
+GROUP BY location, population
+ORDER BY Infection_Rate DESC
+-- Andora has the highest Infection Rate (given its population) with a rate of 17.13%
+
+--7. Countries with the highest death rate compared to Population
+SELECT location, population, MAX(cast(total_deaths as int)) AS Death_Count, MAX(ROUND((total_deaths/population)*100,2)) AS Death_Rate
+FROM CovidDeaths
+WHERE population IS NOT NULL
+AND Continent IS NOT NULL
+GROUP BY location, population
+ORDER BY Death_Rate DESC
+-- Hungary has the highest Death Rate (given its population) with a rate of 0.29%
+
+
+--8. Death count by continent
+SELECT continent, MAX(cast(total_deaths as int)) AS Cont_Death_Count 
+FROM CovidDeaths
+WHERE Continent IS NOT NULL
+GROUP BY continent
+ORDER BY Cont_Death_Count DESC
+
+--9. Continents with the highest death rate by population
+SELECT continent, MAX(cast(total_deaths as int)) AS Cont_Death_Count, MAX(ROUND((cast(total_deaths as int)/population)*100,2)) AS Cont_Death_Rate
+FROM CovidDeaths
+WHERE continent IS NOT NULL
+GROUP BY continent
+ORDER BY Cont_Death_Rate DESC 
+
+--10. Death percentage across the world
+SELECT SUM(new_cases) as total_cases, SUM(cast(new_deaths as int)) as total_deaths, ROUND(SUM(cast(new_deaths as int))/SUM(new_cases)*100,2) as Cont_Death_Rate
+FROM CovidDeaths 
+WHERE continent IS NOT NULL
+ORDER BY 1,2
+-- The death rate with every new case was approximately 2.1%
+
+--11. Joining the two tables on Covid Deaths and Covid Vaccinations
+SELECT * 
+FROM CovidDeaths d
+JOIN CovidVaccinations v
+ON d.location = v.location
+AND d.date = v.date
+
+--12. Total World population that has been vaccinated
+SELECT d.continent, d.location, d.date, d.population, v.new_vaccinations
+FROM CovidDeaths d
+JOIN CovidVaccinations v
+ON d.location = v.location
+AND d.date = v.date
+WHERE d.continent IS NOT NULL
+AND v.new_vaccinations IS NOT NULL
+ORDER BY 1,2,3
+
+--13. Showcase of the incremental number in new vaccinations
+SELECT d.continent, d.location, d.date, d.population, v.new_vaccinations, 
+SUM(CONVERT(int, v.new_vaccinations)) OVER (PARTITION BY d.location ORDER BY d.location, d.date) AS Cumulative_Vaccinations
+FROM CovidDeaths d
+JOIN CovidVaccinations v
+ON d.location = v.location
+AND d.date = v.date
+WHERE d.continent IS NOT NULL
+AND v.new_vaccinations IS NOT NULL
+ORDER BY 2,3
+
+--14. Cumulative percentage of people vaccinated using CTE
+WITH Vaccination_Rate (Continent, Location, Date, Population, New_Vaccinations, Cumulative_Vaccinations)
+AS
+(
+SELECT d.continent, d.location, d.date, d.population, v.new_vaccinations 
+, SUM(CONVERT(int, v.new_vaccinations)) OVER (PARTITION BY d.location ORDER BY d.location, d.date) AS Cumulative_Vaccinations
+FROM CovidDeaths d
+JOIN CovidVaccinations v
+ON d.location = v.location
+AND d.date = v.date
+WHERE d.continent IS NOT NULL
+AND v.new_vaccinations IS NOT NULL
+)
+SELECT *, ROUND((Cumulative_Vaccinations/Population)*100,5) AS Cumulative_Vaccination_Rate
+FROM Vaccination_Rate
+
+--15. Cumulative percentage of people vaccinated using a TEMP Table
+DROP Table if exists #PopulationVaccinationRate
+Create Table #PopulationVaccinationRate
+(
+Continent nvarchar(255),
+Location nvarchar(255),
+Date datetime,
+Population numeric,
+New_vaccinations numeric,
+Cumulative_Vaccinations numeric
+)
+INSERT INTO #PopulationVaccinationRate
+SELECT d.continent, d.location, d.date, d.population, v.new_vaccinations 
+, SUM(CONVERT(int, v.new_vaccinations)) OVER (PARTITION BY d.location ORDER BY d.location, d.date) AS Cumulative_Vaccinations
+FROM CovidDeaths d
+JOIN CovidVaccinations v
+ON d.location = v.location
+AND d.date = v.date
+WHERE d.continent IS NOT NULL
+AND v.new_vaccinations IS NOT NULL
+
+SELECT *, ROUND((Cumulative_Vaccinations/Population)*100,5) AS Cumulative_Vaccination_Rate
+FROM #PopulationVaccinationRate
+
+--16. Creating a View to store data for future visualizations
+
+CREATE VIEW PopulationVaccinationRate AS
+
+SELECT d.continent, d.location, d.date, d.population, v.new_vaccinations, 
+SUM(CONVERT(int, v.new_vaccinations)) OVER (PARTITION BY d.location ORDER BY d.location, d.date) AS Cumulative_Vaccinations
+FROM CovidDeaths d
+JOIN CovidVaccinations v
+ON d.location = v.location
+AND d.date = v.date
+WHERE d.continent IS NOT NULL
+AND v.new_vaccinations IS NOT NULL
+SELECT *
+FROM PopulationVaccinationRate
